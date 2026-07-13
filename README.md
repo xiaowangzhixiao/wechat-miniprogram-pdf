@@ -86,9 +86,12 @@ npm test
 npm run pack:check
 ```
 
-GitHub Release 发布后，`publish.yml` 使用 npm Trusted Publishing（OIDC）发布。首次发布前需在 npm 包设置中绑定 GitHub 用户 `xiaowangzhixiao`、仓库 `wechat-miniprogram-pdf` 和工作流文件 `publish.yml`。
+GitHub Release 发布后，`publish.yml` 自动发布 npm：
+
+1. 首次发布时，在 GitHub 仓库添加一次性的 `NPM_TOKEN` Secret，再创建 `v0.1.0` Release。
+2. 包建立后，在 npm 包设置中绑定 Trusted Publisher：GitHub 用户 `xiaowangzhixiao`、仓库 `wechat-miniprogram-pdf`、工作流 `publish.yml`。
+3. 删除 GitHub 的 `NPM_TOKEN` Secret。后续 Release 将只使用短期 OIDC 凭据发布并自动生成 provenance。
 
 ## License
 
 Apache-2.0。PDF.js 的版权与第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
