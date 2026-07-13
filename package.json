@@ -1,0 +1,56 @@
+{
+  "name": "wechat-miniprogram-pdf",
+  "version": "0.1.0",
+  "description": "Native PDF.js canvas renderer for WeChat Mini Programs",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "exports": {
+    ".": "./dist/index.cjs"
+  },
+  "bin": {
+    "wechat-miniprogram-pdf": "scripts/copy-runtime.mjs"
+  },
+  "files": [
+    "dist",
+    "scripts/copy-runtime.mjs",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "prepack": "npm run build && npm test",
+    "pack:check": "npm pack --dry-run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaowangzhixiao/wechat-miniprogram-pdf.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xiaowangzhixiao/wechat-miniprogram-pdf/issues"
+  },
+  "homepage": "https://github.com/xiaowangzhixiao/wechat-miniprogram-pdf#readme",
+  "keywords": [
+    "wechat",
+    "miniprogram",
+    "pdf",
+    "pdfjs",
+    "canvas"
+  ],
+  "author": "xiaowangzhixiao",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.1.200"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.6"
+  }
+}
