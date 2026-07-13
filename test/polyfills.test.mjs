@@ -1,6 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MiniDOMMatrix, MiniPath2D, replayPath } from "../src/polyfills.mjs";
+import { MiniDOMMatrix, MiniPath2D, MiniTextDecoder, MiniTextEncoder, replayPath } from "../src/polyfills.mjs";
+
+test("MiniTextDecoder supports the encodings used by PDF.js", () => {
+  assert.equal(new MiniTextDecoder().decode(Uint8Array.from([0xef, 0xbb, 0xbf, 0xe4, 0xb8, 0xad, 0xf0, 0x9f, 0x98, 0x80])), "中😀");
+  assert.equal(new MiniTextDecoder("utf-16be", { fatal: true }).decode(Uint8Array.from([0xfe, 0xff, 0x4e, 0x2d])), "中");
+  assert.equal(new MiniTextDecoder("utf-16le", { fatal: true }).decode(Uint8Array.from([0xff, 0xfe, 0x2d, 0x4e])), "中");
+  assert.throws(() => new MiniTextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from([0xff])), TypeError);
+  assert.throws(() => new MiniTextDecoder("utf-16be", { fatal: true }).decode(Uint8Array.from([0xd8, 0x00])), TypeError);
+});
+
+test("MiniTextDecoder preserves an incomplete UTF-8 sequence while streaming", () => {
+  const decoder = new MiniTextDecoder();
+  assert.equal(decoder.decode(Uint8Array.from([0xe4, 0xb8]), { stream: true }), "");
+  assert.equal(decoder.decode(Uint8Array.from([0xad])), "中");
+});
+
+test("MiniTextEncoder encodes UTF-8 and respects encodeInto capacity", () => {
+  const encoder = new MiniTextEncoder();
+  assert.deepEqual([...encoder.encode("A中😀")], [0x41, 0xe4, 0xb8, 0xad, 0xf0, 0x9f, 0x98, 0x80]);
+  const destination = new Uint8Array(4);
+  assert.deepEqual(encoder.encodeInto("中A", destination), { read: 2, written: 4 });
+  assert.deepEqual([...destination], [0xe4, 0xb8, 0xad, 0x41]);
+});
 
 test("MiniDOMMatrix composes and inverts 2D transforms", () => {
   const matrix = new MiniDOMMatrix().translateSelf(10, 20).scaleSelf(2, 3);

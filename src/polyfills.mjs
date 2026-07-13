@@ -1,5 +1,220 @@
 const radians = degrees => degrees * Math.PI / 180;
 
+function toUint8Array(input) {
+  if (input == null) return new Uint8Array();
+  if (input instanceof ArrayBuffer) return new Uint8Array(input);
+  if (ArrayBuffer.isView(input)) return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+  throw new TypeError("TextDecoder input must be an ArrayBuffer or an ArrayBuffer view");
+}
+
+function normalizeEncoding(label) {
+  const normalized = String(label || "utf-8").trim().toLowerCase().replace(/_/g, "-");
+  if (["utf-8", "utf8", "unicode-1-1-utf-8"].includes(normalized)) return "utf-8";
+  if (["utf-16", "utf-16le", "utf16le", "ucs-2", "ucs2"].includes(normalized)) return "utf-16le";
+  if (["utf-16be", "utf16be"].includes(normalized)) return "utf-16be";
+  throw new RangeError(`Unsupported encoding: ${label}`);
+}
+
+function codePointToString(codePoint) {
+  if (codePoint <= 0xffff) return String.fromCharCode(codePoint);
+  const value = codePoint - 0x10000;
+  return String.fromCharCode(0xd800 + (value >> 10), 0xdc00 + (value & 0x3ff));
+}
+
+export class MiniTextDecoder {
+  constructor(label = "utf-8", options = {}) {
+    this.encoding = normalizeEncoding(label);
+    this.fatal = Boolean(options.fatal);
+    this.ignoreBOM = Boolean(options.ignoreBOM);
+    this._pending = new Uint8Array();
+    this._bomSeen = false;
+  }
+
+  decode(input, options = {}) {
+    const incoming = toUint8Array(input);
+    const bytes = new Uint8Array(this._pending.byteLength + incoming.byteLength);
+    bytes.set(this._pending);
+    bytes.set(incoming, this._pending.byteLength);
+    this._pending = new Uint8Array();
+
+    const stream = Boolean(options.stream);
+    const decoded = this.encoding === "utf-8"
+      ? this._decodeUtf8(bytes, stream)
+      : this._decodeUtf16(bytes, stream, this.encoding === "utf-16le");
+    let output = decoded;
+    if (!this._bomSeen && output.length > 0) {
+      this._bomSeen = true;
+      if (!this.ignoreBOM && output.charCodeAt(0) === 0xfeff) output = output.slice(1);
+    }
+    if (!stream) {
+      this._pending = new Uint8Array();
+      this._bomSeen = false;
+    }
+    return output;
+  }
+
+  _invalid() {
+    if (this.fatal) throw new TypeError("The encoded data is not valid");
+    return "\ufffd";
+  }
+
+  _decodeUtf8(bytes, stream) {
+    let output = "";
+    let index = 0;
+    while (index < bytes.length) {
+      const first = bytes[index];
+      if (first <= 0x7f) {
+        output += String.fromCharCode(first);
+        index += 1;
+        continue;
+      }
+
+      let length;
+      let codePoint;
+      let minimum;
+      if (first >= 0xc2 && first <= 0xdf) {
+        length = 2;
+        codePoint = first & 0x1f;
+        minimum = 0x80;
+      } else if (first >= 0xe0 && first <= 0xef) {
+        length = 3;
+        codePoint = first & 0x0f;
+        minimum = 0x800;
+      } else if (first >= 0xf0 && first <= 0xf4) {
+        length = 4;
+        codePoint = first & 0x07;
+        minimum = 0x10000;
+      } else {
+        output += this._invalid();
+        index += 1;
+        continue;
+      }
+
+      if (index + length > bytes.length) {
+        if (stream) {
+          this._pending = bytes.slice(index);
+          break;
+        }
+        output += this._invalid();
+        break;
+      }
+
+      let valid = true;
+      for (let offset = 1; offset < length; offset += 1) {
+        const next = bytes[index + offset];
+        if ((next & 0xc0) !== 0x80) {
+          valid = false;
+          break;
+        }
+        codePoint = (codePoint << 6) | (next & 0x3f);
+      }
+      if (!valid || codePoint < minimum || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+        output += this._invalid();
+        index += 1;
+        continue;
+      }
+      output += codePointToString(codePoint);
+      index += length;
+    }
+    return output;
+  }
+
+  _decodeUtf16(bytes, stream, littleEndian) {
+    let length = bytes.length;
+    if (length % 2 === 1) {
+      if (stream) {
+        this._pending = bytes.slice(length - 1);
+        length -= 1;
+      } else {
+        length -= 1;
+      }
+    }
+
+    let output = "";
+    for (let index = 0; index < length; index += 2) {
+      const codeUnit = littleEndian
+        ? bytes[index] | (bytes[index + 1] << 8)
+        : (bytes[index] << 8) | bytes[index + 1];
+      if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+        if (index + 2 >= length) {
+          if (stream) {
+            this._pending = bytes.slice(index);
+            break;
+          }
+          output += this._invalid();
+          continue;
+        }
+        const next = littleEndian
+          ? bytes[index + 2] | (bytes[index + 3] << 8)
+          : (bytes[index + 2] << 8) | bytes[index + 3];
+        if (next < 0xdc00 || next > 0xdfff) {
+          output += this._invalid();
+          continue;
+        }
+        output += String.fromCharCode(codeUnit, next);
+        index += 2;
+      } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+        output += this._invalid();
+      } else {
+        output += String.fromCharCode(codeUnit);
+      }
+    }
+    if (!stream && bytes.length % 2 === 1) output += this._invalid();
+    return output;
+  }
+}
+
+export class MiniTextEncoder {
+  get encoding() { return "utf-8"; }
+
+  encode(input = "") {
+    const value = String(input);
+    const bytes = [];
+    for (let index = 0; index < value.length; index += 1) {
+      let codePoint = value.charCodeAt(index);
+      if (codePoint >= 0xd800 && codePoint <= 0xdbff) {
+        const next = value.charCodeAt(index + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          codePoint = 0x10000 + ((codePoint - 0xd800) << 10) + (next - 0xdc00);
+          index += 1;
+        } else {
+          codePoint = 0xfffd;
+        }
+      } else if (codePoint >= 0xdc00 && codePoint <= 0xdfff) {
+        codePoint = 0xfffd;
+      }
+
+      if (codePoint <= 0x7f) bytes.push(codePoint);
+      else if (codePoint <= 0x7ff) bytes.push(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f));
+      else if (codePoint <= 0xffff) bytes.push(0xe0 | (codePoint >> 12), 0x80 | ((codePoint >> 6) & 0x3f), 0x80 | (codePoint & 0x3f));
+      else bytes.push(0xf0 | (codePoint >> 18), 0x80 | ((codePoint >> 12) & 0x3f), 0x80 | ((codePoint >> 6) & 0x3f), 0x80 | (codePoint & 0x3f));
+    }
+    return Uint8Array.from(bytes);
+  }
+
+  encodeInto(input, destination) {
+    if (!(destination instanceof Uint8Array)) throw new TypeError("TextEncoder destination must be a Uint8Array");
+    const value = String(input);
+    let read = 0;
+    let written = 0;
+    while (read < value.length) {
+      const first = value.charCodeAt(read);
+      const isPair = first >= 0xd800 && first <= 0xdbff
+        && value.charCodeAt(read + 1) >= 0xdc00 && value.charCodeAt(read + 1) <= 0xdfff;
+      const consumed = isPair ? 2 : 1;
+      const encoded = this.encode(value.slice(read, read + consumed));
+      if (written + encoded.length > destination.length) break;
+      destination.set(encoded, written);
+      read += consumed;
+      written += encoded.length;
+    }
+    return { read, written };
+  }
+}
+
+if (typeof globalThis.TextDecoder === "undefined") globalThis.TextDecoder = MiniTextDecoder;
+if (typeof globalThis.TextEncoder === "undefined") globalThis.TextEncoder = MiniTextEncoder;
+
 if (typeof ArrayBuffer.prototype.transferToFixedLength !== "function") {
   ArrayBuffer.prototype.transferToFixedLength = function transferToFixedLength(newLength = this.byteLength) {
     const output = new ArrayBuffer(newLength);

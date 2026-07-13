@@ -11,6 +11,7 @@
 - 单文件 CommonJS 运行时，可放入独立分包。
 - 不生成供用户长按保存的页面图片。
 - 支持 `ArrayBuffer` / `Uint8Array`、页数、分页、缩放、旋转和资源释放。
+- 内置 `TextDecoder` / `TextEncoder`、`structuredClone` 等兼容实现，覆盖缺少相关 Web API 的真机运行环境。
 
 ## 安装与复制
 
